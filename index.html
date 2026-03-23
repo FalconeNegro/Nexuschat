@@ -2007,36 +2007,44 @@ function clearUser() {
   try { localStorage.removeItem(LS_KEY); } catch(e) {}
 }
 
-// ─── BOOT: check for saved user on page load ───────────────────────────────────
-(function checkSavedUser() {
+// ─── BOOT: auto-login if saved user exists ────────────────────────────────────
+// Runs after DOM is ready (module scripts are deferred automatically)
+async function bootApp() {
   const saved = loadUser();
+
   if (saved && saved.uid && saved.name) {
-    // Show returning user panel
-    const avColors2 = { cyan:'av-cyan', purple:'av-purple', pink:'av-pink', green:'av-green', amber:'av-amber', blue:'av-blue', red:'av-red' };
-    const neonVars2 = { cyan:'var(--neon-cyan)', purple:'var(--neon-purple)', pink:'var(--neon-pink)', green:'var(--neon-green)', amber:'var(--neon-amber)', blue:'var(--neon-blue)', red:'var(--neon-red)' };
-    const avCl  = avColors2[saved.avatarColor] || 'av-cyan';
-    const avCol = neonVars2[saved.avatarColor]  || 'var(--neon-cyan)';
+    // ── Returning user: skip login screen entirely ──
+    ME = { ...saved, status: 'online' };
 
-    const avatarEl = document.getElementById('returning-avatar');
-    avatarEl.textContent = saved.name[0];
-    avatarEl.className = avCl;
-    avatarEl.style.color = avCol;
-    avatarEl.style.borderColor = avCol;
-    avatarEl.style.boxShadow = `0 0 16px ${avCol.replace('var(','').replace(')','')},0.3)`.replace('--neon-','rgba(0,').replace(/rgba\(0,(\w+)/,'');
-    // simpler glow:
-    avatarEl.style.boxShadow = '0 0 16px rgba(0,245,255,0.3)';
-
-    document.getElementById('returning-name').textContent = saved.name;
-    document.getElementById('returning-name-btn').textContent = saved.name;
-    document.getElementById('returning-tag').textContent = saved.tag || '';
-
-    document.getElementById('returning-panel').style.display = 'block';
+    // Update the login screen to show "connecting..." briefly
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('returning-panel').style.display = 'none';
     document.getElementById('new-user-panel').style.display  = 'none';
+
+    // Show a quick connecting splash instead
+    const splash = document.createElement('div');
+    splash.style.cssText = 'text-align:center;';
+    splash.innerHTML = `
+      <div style="font-family:var(--font-display);font-size:48px;font-weight:900;letter-spacing:4px;color:var(--neon-cyan);text-shadow:0 0 32px rgba(0,245,255,0.5);">NEXUS<span style="color:var(--neon-purple);">CHAT</span></div>
+      <div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted);margin-top:16px;letter-spacing:1px;">Connessione come <span style="color:var(--neon-cyan);">${saved.name}</span>...</div>
+      <div style="margin-top:20px;display:flex;gap:6px;justify-content:center;">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);display:inline-block;animation:typing 1.2s infinite;"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);display:inline-block;animation:typing 1.2s infinite .2s;"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);display:inline-block;animation:typing 1.2s infinite .4s;"></span>
+      </div>
+      <button onclick="window.showNewLogin()" style="margin-top:24px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;font-family:var(--font-mono);text-decoration:underline;">Non sei ${saved.name}? Cambia account</button>`;
+    document.getElementById('login-screen').appendChild(splash);
+
+    await connectToFirebase();
   } else {
+    // ── New user: show login form ──
     document.getElementById('returning-panel').style.display = 'none';
     document.getElementById('new-user-panel').style.display  = 'block';
+    setTimeout(() => document.getElementById('login-username')?.focus(), 100);
   }
-})();
+}
+
+bootApp();
 
 // Auto-login with saved user
 window.doAutoLogin = async () => {
@@ -2049,11 +2057,15 @@ window.doAutoLogin = async () => {
   await connectToFirebase();
 };
 
-// Show the new account form
+// Show the new account form (reset login screen)
 window.showNewLogin = () => {
+  // Remove any splash element added by bootApp
+  const splash = document.querySelector('#login-screen > div:last-child:not([id])');
+  if (splash) splash.remove();
   document.getElementById('returning-panel').style.display = 'none';
   document.getElementById('new-user-panel').style.display  = 'block';
-  setTimeout(() => document.getElementById('login-username').focus(), 100);
+  document.getElementById('login-screen').style.display    = 'flex';
+  setTimeout(() => document.getElementById('login-username')?.focus(), 100);
 };
 
 // Make helpers global
