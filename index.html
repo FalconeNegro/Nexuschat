@@ -1321,6 +1321,7 @@
         <button class="panel-icon-btn" id="mic-btn" onclick="toggleMic()" title="Microfono">🎤</button>
         <button class="panel-icon-btn" id="deaf-btn" onclick="toggleDeaf()" title="Cuffie">🎧</button>
         <button class="panel-icon-btn" onclick="openModal('settings-modal')" title="Impostazioni">⚙️</button>
+        <button class="panel-icon-btn" onclick="doLogout()" title="Cambia account" style="font-size:14px;">🚪</button>
       </div>
     </div>
   </div>
@@ -1927,9 +1928,21 @@
 ">
   <div style="text-align:center;margin-bottom:8px;">
     <div style="font-family:var(--font-display);font-size:52px;font-weight:900;letter-spacing:4px;color:var(--neon-cyan);text-shadow:0 0 32px rgba(0,245,255,0.5);">NEXUS<span style="color:var(--neon-purple);">CHAT</span></div>
-    <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);letter-spacing:2px;margin-top:6px;">SCEGLI IL TUO USERNAME PER ENTRARE</div>
+    <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);letter-spacing:2px;margin-top:6px;">IL TUO SPAZIO NEON IN TEMPO REALE</div>
   </div>
-  <div style="background:var(--bg-panel);border:1px solid var(--border-bright);border-radius:var(--radius-xl);padding:32px;width:360px;box-shadow:0 0 60px rgba(0,245,255,0.08);">
+
+  <!-- Returning user panel (shown if saved) -->
+  <div id="returning-panel" style="display:none;background:var(--bg-panel);border:1px solid var(--border-bright);border-radius:var(--radius-xl);padding:28px 32px;width:360px;box-shadow:0 0 60px rgba(0,245,255,0.08);text-align:center;">
+    <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-muted);letter-spacing:1px;margin-bottom:14px;">BENTORNATO</div>
+    <div id="returning-avatar" style="width:64px;height:64px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;border:2px solid var(--neon-cyan);box-shadow:0 0 16px rgba(0,245,255,0.3);"></div>
+    <div id="returning-name" style="font-family:var(--font-display);font-size:22px;font-weight:700;letter-spacing:1px;color:var(--text-primary);"></div>
+    <div id="returning-tag" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-bottom:20px;"></div>
+    <button class="btn-primary" style="width:100%;margin-bottom:10px;" onclick="doAutoLogin()" id="auto-login-btn">⚡ Entra come <span id="returning-name-btn"></span></button>
+    <button onclick="showNewLogin()" style="background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;font-family:var(--font-mono);text-decoration:underline;">Usa un altro account</button>
+  </div>
+
+  <!-- New user panel -->
+  <div id="new-user-panel" style="background:var(--bg-panel);border:1px solid var(--border-bright);border-radius:var(--radius-xl);padding:32px;width:360px;box-shadow:0 0 60px rgba(0,245,255,0.08);">
     <div class="form-group">
       <label class="form-label">Username</label>
       <input type="text" class="form-input" id="login-username" placeholder="es. ByteWolf" maxlength="20" autofocus>
@@ -1949,8 +1962,9 @@
     <button class="btn-primary" style="width:100%;margin-top:16px;" onclick="doLogin()" id="login-btn">⚡ Entra in NexusChat</button>
     <div id="login-error" style="color:var(--neon-red);font-size:12px;margin-top:10px;text-align:center;font-family:var(--font-mono);display:none;"></div>
   </div>
+
   <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-align:center;">
-    Condividi questo file con i tuoi amici — tutti vedranno la stessa chat 🔥
+    Condividi questo link con i tuoi amici — tutti vedranno la stessa chat 🔥
   </div>
 </div>
 
@@ -1976,51 +1990,121 @@ const fbApp = initializeApp(firebaseConfig);
 const db    = getDatabase(fbApp);
 
 // ─── SESSION USER ─────────────────────────────────────────────────────────────
-let ME = null;          // { uid, name, avatarColor, tag }
+const LS_KEY = 'nexuschat_user_v2';
+let ME = null;
 let loginColor = 'cyan';
 let typingTimerFB = null;
-let activeListeners = {};  // channelId → unsubscribe fn
+let activeListeners = {};
 
-// Make helpers global so inline HTML can call them
+// ─── PERSIST HELPERS ──────────────────────────────────────────────────────────
+function saveUser(user) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(user)); } catch(e) {}
+}
+function loadUser() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch(e) { return null; }
+}
+function clearUser() {
+  try { localStorage.removeItem(LS_KEY); } catch(e) {}
+}
+
+// ─── BOOT: check for saved user on page load ───────────────────────────────────
+(function checkSavedUser() {
+  const saved = loadUser();
+  if (saved && saved.uid && saved.name) {
+    // Show returning user panel
+    const avColors2 = { cyan:'av-cyan', purple:'av-purple', pink:'av-pink', green:'av-green', amber:'av-amber', blue:'av-blue', red:'av-red' };
+    const neonVars2 = { cyan:'var(--neon-cyan)', purple:'var(--neon-purple)', pink:'var(--neon-pink)', green:'var(--neon-green)', amber:'var(--neon-amber)', blue:'var(--neon-blue)', red:'var(--neon-red)' };
+    const avCl  = avColors2[saved.avatarColor] || 'av-cyan';
+    const avCol = neonVars2[saved.avatarColor]  || 'var(--neon-cyan)';
+
+    const avatarEl = document.getElementById('returning-avatar');
+    avatarEl.textContent = saved.name[0];
+    avatarEl.className = avCl;
+    avatarEl.style.color = avCol;
+    avatarEl.style.borderColor = avCol;
+    avatarEl.style.boxShadow = `0 0 16px ${avCol.replace('var(','').replace(')','')},0.3)`.replace('--neon-','rgba(0,').replace(/rgba\(0,(\w+)/,'');
+    // simpler glow:
+    avatarEl.style.boxShadow = '0 0 16px rgba(0,245,255,0.3)';
+
+    document.getElementById('returning-name').textContent = saved.name;
+    document.getElementById('returning-name-btn').textContent = saved.name;
+    document.getElementById('returning-tag').textContent = saved.tag || '';
+
+    document.getElementById('returning-panel').style.display = 'block';
+    document.getElementById('new-user-panel').style.display  = 'none';
+  } else {
+    document.getElementById('returning-panel').style.display = 'none';
+    document.getElementById('new-user-panel').style.display  = 'block';
+  }
+})();
+
+// Auto-login with saved user
+window.doAutoLogin = async () => {
+  const saved = loadUser();
+  if (!saved) { showNewLogin(); return; }
+  const btn = document.getElementById('auto-login-btn');
+  btn.textContent = '⏳ Connessione...';
+  btn.disabled = true;
+  ME = { ...saved, status: 'online' };
+  await connectToFirebase();
+};
+
+// Show the new account form
+window.showNewLogin = () => {
+  document.getElementById('returning-panel').style.display = 'none';
+  document.getElementById('new-user-panel').style.display  = 'block';
+  setTimeout(() => document.getElementById('login-username').focus(), 100);
+};
+
+// Make helpers global
 window.loginPickColor = (el, color) => {
   document.querySelectorAll('#login-color-picker .color-opt').forEach(e => e.classList.remove('selected'));
   el.classList.add('selected');
   loginColor = color;
 };
 
+// New user login
 window.doLogin = async () => {
   const nameRaw = document.getElementById('login-username').value.trim();
   if (!nameRaw || nameRaw.length < 2) {
     showLoginError('Username deve avere almeno 2 caratteri');
     return;
   }
-
   const btn = document.getElementById('login-btn');
   btn.textContent = '⏳ Connessione...';
   btn.disabled = true;
 
+  // Generate stable uid — or reuse if same name+color
   const uid = 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
   const tag  = '#' + String(Math.floor(Math.random()*9000)+1000);
   ME = { uid, name: nameRaw, avatarColor: loginColor, tag, status: 'online' };
 
-  // Write presence to Firebase
-  const presRef = ref(db, `presence/${uid}`);
-  await set(presRef, { name: ME.name, avatarColor: ME.avatarColor, tag: ME.tag, status: 'online', ts: Date.now() });
-  // Auto-remove on disconnect
-  onDisconnect(presRef).remove();
+  // Save permanently to localStorage
+  saveUser(ME);
 
-  // Hide login, show app
-  document.getElementById('login-screen').style.display = 'none';
-
-  // Boot app
-  initApp();
+  await connectToFirebase();
 };
+
+// Shared connection logic
+async function connectToFirebase() {
+  try {
+    const presRef = ref(db, `presence/${ME.uid}`);
+    await set(presRef, { name: ME.name, avatarColor: ME.avatarColor, tag: ME.tag, status: 'online', ts: Date.now() });
+    onDisconnect(presRef).remove();
+    document.getElementById('login-screen').style.display = 'none';
+    initApp();
+  } catch(err) {
+    showLoginError('Errore connessione: ' + err.message);
+    const btn = document.getElementById('login-btn') || document.getElementById('auto-login-btn');
+    if (btn) { btn.textContent = '⚡ Riprova'; btn.disabled = false; }
+  }
+}
 
 function showLoginError(msg) {
   const el = document.getElementById('login-error');
-  el.textContent = msg; el.style.display = 'block';
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
   const btn = document.getElementById('login-btn');
-  btn.textContent = '⚡ Entra in NexusChat'; btn.disabled = false;
+  if (btn) { btn.textContent = '⚡ Entra in NexusChat'; btn.disabled = false; }
 }
 
 // ─── Enter key on login
@@ -2097,6 +2181,19 @@ function initApp() {
 
   // Listen to online presence
   listenPresence();
+
+  // Listen to all voice channels presence (for sidebar preview)
+  state.vcUsers = {};
+  onValue(ref(db, 'voice'), snap => {
+    state.vcUsers = {};
+    snap.forEach(chSnap => {
+      state.vcUsers[chSnap.key] = {};
+      chSnap.forEach(userSnap => {
+        state.vcUsers[chSnap.key][userSnap.key] = userSnap.val();
+      });
+    });
+    renderChannels(); // refresh sidebar to show who's in VC
+  });
 
   // Load messages for default channel
   switchChannel('c3');
@@ -2249,11 +2346,21 @@ function renderChannels(filter='') {
 
       let icon = ch.type === 'voice' ? '🔊' : ch.type === 'announce' ? '📢' : '#';
       let badgeHtml = ch.unread ? `<span class="ch-badge">${ch.unread}</span>` : '';
+
+      // For voice channels: show who's currently inside (from Firebase)
       let voiceUsersHtml = '';
-      if (ch.type === 'voice' && ch.users && ch.users.length) {
-        voiceUsersHtml = ch.users.map(u =>
-          `<div class="voice-user"><div class="voice-user-avatar av-cyan" style="font-size:8px;font-weight:700;">${u[0]}</div>${u}</div>`
-        ).join('');
+      if (ch.type === 'voice') {
+        const vcUsers = state.vcUsers && state.vcUsers[ch.id] ? Object.values(state.vcUsers[ch.id]) : [];
+        if (vcUsers.length) {
+          voiceUsersHtml = vcUsers.map(u => {
+            const avCl  = avColors[u.avatarColor] || 'av-cyan';
+            const avCol = neonVars[u.avatarColor]  || neonVars.cyan;
+            return `<div class="voice-user">
+              <div class="voice-user-avatar ${avCl}" style="color:${avCol};font-size:8px;font-weight:700;">${u.name[0]}</div>
+              <span style="font-size:11px;color:var(--text-muted);">${u.name}</span>
+            </div>`;
+          }).join('');
+        }
       }
 
       item.innerHTML = `
@@ -2344,7 +2451,7 @@ function renderMembers(filter='') {
         <div class="status-dot status-online"></div>
       </div>
       <div class="user-info-sm">
-        <div class="name" style="font-size:13px;color:${avCol};">${u.name}${isMe?' (tu)':''}</div>
+        <div class="name" style="font-size:13px;color:${avCol};">${u.name}${isMe ? ' (tu)' : ''}</div>
         <div class="tag">${u.tag || ''}</div>
       </div>`;
     list.appendChild(item);
@@ -2416,8 +2523,10 @@ function renderMessages() {
     // Identity chip
     let chipHtml = '';
     if (!isMine && !isCont) {
-      const id = { icon:'👤', rel:'Membro', relColor: avColor, bg:`rgba(0,0,0,0.15)`, border: avColor.replace('var(','').replace(')','').includes('neon') ? avColor : 'rgba(255,255,255,0.1)' };
-      chipHtml = `<div class="identity-chip" style="border-color:${avColor.replace('var(--neon-','rgba(').replace(')',',0.3)')};background:${avColor.replace('var(--neon-','rgba(').replace(')',',0.06)')};color:${avColor};">
+      // Pre-compute colors outside template literal to avoid ) inside ${}
+      const chipBorder = avColor.replace('var(--neon-', 'rgba(').replace(')', ',0.3)');
+      const chipBg     = avColor.replace('var(--neon-', 'rgba(').replace(')', ',0.06)');
+      chipHtml = `<div class="identity-chip" style="border-color:${chipBorder};background:${chipBg};color:${avColor};">
         <div class="id-avatar ${avClass}" style="color:${avColor};">${authorName[0]}<div class="status-dot status-online"></div></div>
         <span class="id-name" style="color:${avColor};">${authorName}</span>
         <span class="id-tag">${authorTag}</span>
@@ -3159,7 +3268,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'm' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') toggleMic();
 });
 
-// ─── VOICE CHANNEL — Real Mic + Screen Share ──────────────────────────────────
+// ─── VOICE CHANNEL — Real Mic + Screen Share + Firebase Presence ─────────────
 let vcState = {
   active: false,
   channelId: null,
@@ -3170,12 +3279,12 @@ let vcState = {
   timerInterval: null,
   seconds: 0,
   speakInterval: null,
-  // Real Web API handles
   micStream: null,
   screenStream: null,
   audioCtx: null,
   analyser: null,
-  vadInterval: null,   // voice activity detection
+  vadInterval: null,
+  vcPresenceUnsub: null,
 };
 
 // ── JOIN ──────────────────────────────────────────────────────────────────────
@@ -3183,7 +3292,6 @@ async function joinVoice(chId) {
   const ch = getChannel(chId);
   if (!ch || ch.type !== 'voice') return;
 
-  // Reset state
   vcState.active    = true;
   vcState.channelId = chId;
   vcState.micMuted  = false;
@@ -3195,7 +3303,6 @@ async function joinVoice(chId) {
   document.getElementById('vc-ch-name').textContent = ch.name;
   document.getElementById('voice-overlay').classList.remove('hidden');
 
-  // Reset control buttons
   setVcBtn('vc-mic-btn',   false); document.getElementById('vc-mic-btn').textContent   = '🎤';
   setVcBtn('vc-deaf-btn',  false); document.getElementById('vc-deaf-btn').textContent  = '🎧';
   setVcBtn('vc-cam-btn',   false); document.getElementById('vc-cam-btn').textContent   = '📷';
@@ -3204,12 +3311,18 @@ async function joinVoice(chId) {
   document.getElementById('vc-cam-label').textContent   = 'Camera';
   document.getElementById('vc-share-label').textContent = 'Schermo';
 
-  // Build simulated participants from Firebase online users
-  const others = Object.entries(state.onlineUsers)
-    .filter(([uid]) => uid !== ME?.uid)
-    .map(([uid]) => ({ id: uid, speaking: false }));
+  // Register myself in Firebase voice presence
+  const myVcRef = ref(db, `voice/${chId}/${ME.uid}`);
+  await set(myVcRef, { name: ME.name, avatarColor: ME.avatarColor, tag: ME.tag, ts: Date.now() });
+  onDisconnect(myVcRef).remove();
 
-  renderVcParticipants(others);
+  // Listen to real participants in this voice channel
+  if (vcState.vcPresenceUnsub) vcState.vcPresenceUnsub();
+  vcState.vcPresenceUnsub = onValue(ref(db, `voice/${chId}`), snap => {
+    const participants = [];
+    snap.forEach(child => { const u = child.val(); if (u) participants.push({ uid: child.key, ...u }); });
+    renderVcParticipants(participants);
+  });
 
   // Timer
   clearInterval(vcState.timerInterval);
@@ -3220,117 +3333,108 @@ async function joinVoice(chId) {
     document.getElementById('vc-timer').textContent = `${mm}:${ss}`;
   }, 1000);
 
-  // Simulate others speaking randomly
-  clearInterval(vcState.speakInterval);
-  vcState.speakInterval = setInterval(() => {
-    others.forEach(p => {
-      const speak = Math.random() > 0.65;
-      setSpeaking(p.id, speak);
-    });
-  }, 2200);
-
-  // Request real microphone access
   await requestMic();
-
-  toast('🔊', `Connesso a #${ch.name}`, 'Microfono reale attivo');
 }
 
 // ── REAL MICROPHONE ───────────────────────────────────────────────────────────
 async function requestMic() {
+  const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (!isSecure) {
+    setVcBtn('vc-mic-btn', false, true);
+    document.getElementById('vc-mic-btn').textContent   = '🔒';
+    document.getElementById('vc-mic-label').textContent = 'Serve HTTPS';
+    toast('🔒', 'Microfono richiede HTTPS', 'Apri il sito via GitHub Pages o Netlify per usare il mic.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setVcBtn('vc-mic-btn', false, true);
+    document.getElementById('vc-mic-btn').textContent   = '🚫';
+    document.getElementById('vc-mic-label').textContent = 'No supporto';
+    toast('⚠️', 'Browser non supportato', 'Usa Chrome o Firefox per il microfono.');
+    return;
+  }
   try {
     vcState.micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     setupVAD(vcState.micStream);
-    toast('🎤', 'Microfono connesso', 'Il tuo mic è attivo — parla per vedere l\'indicatore');
+    toast('🎤', 'Microfono connesso!', "Parla — l'anello verde si attiva in automatico");
   } catch(err) {
-    // Permission denied or no mic
     vcState.micStream = null;
-    vcState.micMuted = true;
+    vcState.micMuted  = true;
     setVcBtn('vc-mic-btn', false, true);
-    document.getElementById('vc-mic-btn').textContent = '🚫';
+    document.getElementById('vc-mic-btn').textContent   = '🚫';
     document.getElementById('vc-mic-label').textContent = 'No mic';
-    setSpeaking('m1', false);
-    toast('⚠️', 'Microfono non disponibile', err.name === 'NotAllowedError'
-      ? 'Permesso microfono negato. Consenti l\'accesso nelle impostazioni del browser.'
-      : 'Nessun microfono trovato.');
+    setSpeaking(ME.uid, false);
+    const msg = err.name === 'NotAllowedError'
+      ? 'Clicca 🔒 nella barra URL → consenti microfono → ricarica.'
+      : err.name === 'NotFoundError'
+      ? 'Nessun microfono trovato. Controlla i dispositivi audio.'
+      : err.message;
+    toast('⚠️', 'Microfono non disponibile', msg);
   }
 }
 
-// ── VOICE ACTIVITY DETECTION (VAD) — real audio level ────────────────────────
+// ── VOICE ACTIVITY DETECTION ──────────────────────────────────────────────────
 function setupVAD(stream) {
   try {
-    vcState.audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
-    vcState.analyser  = vcState.audioCtx.createAnalyser();
+    vcState.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (vcState.audioCtx.state === 'suspended') vcState.audioCtx.resume();
+    vcState.analyser = vcState.audioCtx.createAnalyser();
     vcState.analyser.fftSize = 512;
-    vcState.analyser.smoothingTimeConstant = 0.3;
-
+    vcState.analyser.smoothingTimeConstant = 0.35;
     const source = vcState.audioCtx.createMediaStreamSource(stream);
     source.connect(vcState.analyser);
-
+    // do NOT connect to destination — no echo
     const buf = new Uint8Array(vcState.analyser.frequencyBinCount);
-    const THRESHOLD = 18; // 0-255, tweak if needed
-
+    const THRESHOLD = 15;
+    let speaking = false;
     clearInterval(vcState.vadInterval);
     vcState.vadInterval = setInterval(() => {
-      if (vcState.micMuted || !vcState.analyser) return;
+      if (vcState.micMuted || !vcState.analyser) { if (speaking) { speaking = false; setSpeaking(ME.uid, false); } return; }
       vcState.analyser.getByteFrequencyData(buf);
       const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
-      setSpeaking('m1', avg > THRESHOLD);
+      const nowS = avg > THRESHOLD;
+      if (nowS !== speaking) { speaking = nowS; setSpeaking(ME.uid, nowS); }
     }, 80);
   } catch(e) {
     console.warn('VAD setup failed:', e);
+    toast('⚠️', 'VAD non disponibile', e.message);
   }
 }
 
 // ── SET SPEAKING STATE ────────────────────────────────────────────────────────
-function setSpeaking(memberId, isSpeaking) {
-  const av = document.querySelector(`.vc-avatar[data-mid="${memberId}"]`);
+function setSpeaking(uid, isSpeaking) {
+  const av = document.querySelector(`.vc-avatar[data-mid="${uid}"]`);
   if (!av) return;
   av.classList.toggle('speaking', isSpeaking);
   const pEl = av.closest('.vc-participant');
   if (!pEl) return;
   const st = pEl.querySelector('.vc-p-status');
-  if (st) {
-    st.textContent  = isSpeaking ? '🎤 sta parlando' : 'in ascolto';
-    st.className    = 'vc-p-status' + (isSpeaking ? ' speaking' : '');
-  }
+  if (st) { st.textContent = isSpeaking ? '🎤 sta parlando' : 'in ascolto'; st.className = 'vc-p-status' + (isSpeaking ? ' speaking' : ''); }
 }
 
-// ── RENDER PARTICIPANTS ───────────────────────────────────────────────────────
-function renderVcParticipants(others) {
+// ── RENDER PARTICIPANTS (only real people currently in this VC) ───────────────
+function renderVcParticipants(participants) {
   const cont = document.getElementById('vc-participants');
   cont.innerHTML = '';
-
-  // Self first
-  // Self first
-  const selfM = getSelfMember();
-  appendParticipant(cont, selfM, true, false);
-
-  // Others from Firebase presence
-  others.forEach(p => {
-    const u = state.onlineUsers[p.id];
-    const m = u
-      ? { id: p.id, name: u.name, avatarColor: u.avatarColor, tag: u.tag }
-      : { id: p.id, name: 'Utente', avatarColor: 'cyan' };
-    appendParticipant(cont, m, false, false);
+  participants.forEach(p => {
+    const isSelf = p.uid === ME.uid;
+    const avCl   = avColors[p.avatarColor] || 'av-cyan';
+    const avCol  = neonVars[p.avatarColor] || neonVars.cyan;
+    const selfTag = isSelf ? ' <span style="color:var(--neon-cyan);font-size:10px;">(tu)</span>' : '';
+    const div    = document.createElement('div');
+    div.className = 'vc-participant';
+    div.innerHTML = `
+      <div class="vc-avatar-wrap">
+        <div class="vc-avatar ${avCl}" style="color:${avCol};" data-mid="${p.uid}">${p.name[0]}</div>
+        <div class="vc-mute-icon hidden" id="vc-mute-${p.uid}">🔇</div>
+      </div>
+      <div class="vc-p-name">${p.name}${selfTag}</div>
+      <div class="vc-p-status">in ascolto</div>`;
+    cont.appendChild(div);
   });
 }
 
-function appendParticipant(cont, m, isSelf, speaking) {
-  const avCl  = avColors[m.avatarColor]  || 'av-cyan';
-  const avCol = neonVars[m.avatarColor] || neonVars.cyan;
-
-  const div = document.createElement('div');
-  div.className = 'vc-participant';
-  div.innerHTML = `
-    <div class="vc-avatar-wrap">
-      <div class="vc-avatar ${avCl}${speaking ? ' speaking' : ''}"
-           style="color:${avCol};" data-mid="${m.id}">${m.name[0]}</div>
-      <div class="vc-mute-icon hidden" id="vc-mute-${m.id}">🔇</div>
-    </div>
-    <div class="vc-p-name">${m.name}${isSelf ? ' (tu)' : ''}</div>
-    <div class="vc-p-status">in ascolto</div>`;
-  cont.appendChild(div);
-}
+function appendParticipant() {} // kept for compatibility
 
 // ── LEAVE ─────────────────────────────────────────────────────────────────────
 function leaveVoice() {
@@ -3338,27 +3442,12 @@ function leaveVoice() {
   clearInterval(vcState.timerInterval);
   clearInterval(vcState.speakInterval);
   clearInterval(vcState.vadInterval);
-
-  // Stop real mic
-  if (vcState.micStream) {
-    vcState.micStream.getTracks().forEach(t => t.stop());
-    vcState.micStream = null;
-  }
-  // Stop screen share
-  if (vcState.screenStream) {
-    vcState.screenStream.getTracks().forEach(t => t.stop());
-    vcState.screenStream = null;
-  }
-  // Close audio context
-  if (vcState.audioCtx) {
-    vcState.audioCtx.close().catch(() => {});
-    vcState.audioCtx = null;
-    vcState.analyser = null;
-  }
-
-  // Hide screen preview
+  if (vcState.channelId && ME) remove(ref(db, `voice/${vcState.channelId}/${ME.uid}`));
+  if (vcState.vcPresenceUnsub) { vcState.vcPresenceUnsub(); vcState.vcPresenceUnsub = null; }
+  if (vcState.micStream)    { vcState.micStream.getTracks().forEach(t => t.stop());    vcState.micStream    = null; }
+  if (vcState.screenStream) { vcState.screenStream.getTracks().forEach(t => t.stop()); vcState.screenStream = null; }
+  if (vcState.audioCtx)     { vcState.audioCtx.close().catch(() => {}); vcState.audioCtx = null; vcState.analyser = null; }
   hideScreenPreview();
-
   document.getElementById('voice-overlay').classList.add('hidden');
   toast('📵', 'Disconnesso dal canale vocale', '');
 }
@@ -3371,25 +3460,16 @@ function setVcBtn(id, active, mutedStyle = false) {
 }
 
 function toggleVcMic() {
-  if (!vcState.micStream && !vcState.micMuted) {
-    // No stream yet — request
-    requestMic(); return;
-  }
+  if (!vcState.micStream && !vcState.micMuted) { requestMic(); return; }
   vcState.micMuted = !vcState.micMuted;
-
-  // Mute/unmute real tracks
-  if (vcState.micStream) {
-    vcState.micStream.getAudioTracks().forEach(t => { t.enabled = !vcState.micMuted; });
-  }
-
+  if (vcState.micStream) vcState.micStream.getAudioTracks().forEach(t => { t.enabled = !vcState.micMuted; });
   const btn = document.getElementById('vc-mic-btn');
   btn.textContent = vcState.micMuted ? '🔇' : '🎤';
   setVcBtn('vc-mic-btn', false, vcState.micMuted);
   document.getElementById('vc-mic-label').textContent = vcState.micMuted ? 'Silenziato' : 'Mic';
-
-  const muteIcon = document.getElementById('vc-mute-m1');
+  const muteIcon = document.getElementById('vc-mute-' + ME?.uid);
   if (muteIcon) muteIcon.classList.toggle('hidden', !vcState.micMuted);
-  if (vcState.micMuted) setSpeaking('m1', false);
+  if (vcState.micMuted) setSpeaking(ME.uid, false);
 }
 
 function toggleVcDeaf() {
@@ -3397,9 +3477,8 @@ function toggleVcDeaf() {
   const btn = document.getElementById('vc-deaf-btn');
   btn.textContent = vcState.deafened ? '🔕' : '🎧';
   setVcBtn('vc-deaf-btn', false, vcState.deafened);
-  // Deafen also mutes mic (Discord behaviour)
   if (vcState.deafened && !vcState.micMuted) toggleVcMic();
-  if (!vcState.deafened &&  vcState.micMuted) toggleVcMic();
+  if (!vcState.deafened && vcState.micMuted) toggleVcMic();
 }
 
 function toggleVcCam() {
@@ -3410,14 +3489,9 @@ function toggleVcCam() {
   toast(vcState.camOn ? '📹' : '📷', vcState.camOn ? 'Camera attivata (simulata)' : 'Camera spenta', '');
 }
 
-// ── SCREEN SHARE (real getDisplayMedia) ───────────────────────────────────────
 async function toggleVcShare() {
   if (vcState.sharing) {
-    // Stop sharing
-    if (vcState.screenStream) {
-      vcState.screenStream.getTracks().forEach(t => t.stop());
-      vcState.screenStream = null;
-    }
+    if (vcState.screenStream) { vcState.screenStream.getTracks().forEach(t => t.stop()); vcState.screenStream = null; }
     vcState.sharing = false;
     document.getElementById('vc-share-btn').textContent = '🖥️';
     setVcBtn('vc-share-btn', false);
@@ -3426,67 +3500,35 @@ async function toggleVcShare() {
     toast('🖥️', 'Condivisione schermo interrotta', '');
     return;
   }
-
-  // Start sharing
   try {
-    vcState.screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always' },
-      audio: false
-    });
-
+    vcState.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
     vcState.sharing = true;
     document.getElementById('vc-share-btn').textContent = '🟩';
     setVcBtn('vc-share-btn', true);
     document.getElementById('vc-share-label').textContent = 'Live';
-
-    // Show live preview in the overlay
     showScreenPreview(vcState.screenStream);
-
-    // Handle user stopping via browser native "Stop sharing" button
-    vcState.screenStream.getVideoTracks()[0].addEventListener('ended', () => {
-      if (vcState.sharing) toggleVcShare();
-    });
-
-    toast('🖥️', 'Schermo condiviso!', 'La preview appare in basso nell\'overlay');
+    vcState.screenStream.getVideoTracks()[0].addEventListener('ended', () => { if (vcState.sharing) toggleVcShare(); });
+    toast('🖥️', 'Schermo condiviso!', 'Preview in basso');
   } catch(err) {
-    if (err.name !== 'NotAllowedError') {
-      toast('⚠️', 'Condivisione schermo fallita', err.message);
-    } else {
-      toast('❌', 'Permesso negato', 'Hai annullato la condivisione schermo.');
-    }
+    if (err.name !== 'NotAllowedError') toast('⚠️', 'Condivisione fallita', err.message);
+    else toast('❌', 'Permesso negato', 'Hai annullato la condivisione schermo.');
   }
 }
 
-// ── SCREEN PREVIEW ────────────────────────────────────────────────────────────
 function showScreenPreview(stream) {
   let preview = document.getElementById('vc-screen-preview');
   if (!preview) {
     preview = document.createElement('div');
     preview.id = 'vc-screen-preview';
-    preview.style.cssText = `
-      position:relative; z-index:1;
-      width:min(640px,88vw); border-radius:12px; overflow:hidden;
-      border:2px solid var(--neon-cyan); box-shadow:0 0 24px rgba(0,245,255,0.3);
-      background:#000;
-    `;
+    preview.style.cssText = 'position:relative;z-index:1;width:min(640px,88vw);border-radius:12px;overflow:hidden;border:2px solid var(--neon-cyan);box-shadow:0 0 24px rgba(0,245,255,0.3);background:#000;';
     const label = document.createElement('div');
-    label.style.cssText = `
-      position:absolute; top:8px; left:12px; z-index:2;
-      font-family:var(--font-mono); font-size:11px; color:var(--neon-cyan);
-      background:rgba(0,0,0,0.7); padding:2px 8px; border-radius:6px;
-      letter-spacing:1px;
-    `;
+    label.style.cssText = 'position:absolute;top:8px;left:12px;z-index:2;font-family:var(--font-mono);font-size:11px;color:var(--neon-cyan);background:rgba(0,0,0,0.7);padding:2px 8px;border-radius:6px;letter-spacing:1px;';
     label.textContent = '⬤ LIVE — Schermo condiviso';
     const vid = document.createElement('video');
-    vid.id        = 'vc-screen-video';
-    vid.autoplay  = true;
-    vid.muted     = true;
+    vid.id = 'vc-screen-video'; vid.autoplay = true; vid.muted = true;
     vid.style.cssText = 'width:100%;display:block;border-radius:10px;';
     vid.srcObject = stream;
-    preview.appendChild(label);
-    preview.appendChild(vid);
-
-    // Insert before controls
+    preview.appendChild(label); preview.appendChild(vid);
     const controls = document.querySelector('.vc-controls');
     controls.parentNode.insertBefore(preview, controls);
   } else {
@@ -3496,12 +3538,29 @@ function showScreenPreview(stream) {
 }
 
 function hideScreenPreview() {
-  const preview = document.getElementById('vc-screen-preview');
-  if (preview) preview.remove();
+  const p = document.getElementById('vc-screen-preview');
+  if (p) p.remove();
 }
 
 
+
+// ─── LOGOUT / CHANGE ACCOUNT ──────────────────────────────────────────────────
+function doLogout() {
+  if (!confirm('Vuoi cambiare account? Verrai disconnesso.')) return;
+  // Remove Firebase presence
+  if (ME) remove(ref(db, `presence/${ME.uid}`)).catch(() => {});
+  // Stop voice if active
+  if (vcState.active) leaveVoice();
+  // Clear saved user
+  clearUser();
+  // Reload page to show login screen fresh
+  location.reload();
+}
+
 // ─── EXPOSE GLOBALS needed by non-module inline HTML ─────────────────────────
+window.doLogout             = doLogout;
+window.doAutoLogin          = doAutoLogin;
+window.showNewLogin         = showNewLogin;
 window.openModal            = openModal;
 window.closeModal           = closeModal;
 window.switchServer         = switchServer;
