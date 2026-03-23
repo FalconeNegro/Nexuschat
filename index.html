@@ -2044,33 +2044,18 @@ async function bootApp() {
   const saved = loadUser();
 
   if (saved && saved.uid && saved.name) {
-    // ── Returning user: normalize uid to stable format then skip login ──
+    // Build stable uid — must match exactly what was used when message was sent
     const stableUid = 'u_' + saved.name.toLowerCase().replace(/[^a-z0-9]/g,'') + '_' + (saved.avatarColor || 'cyan');
     ME = { ...saved, uid: stableUid, status: 'online' };
-    saveUser(ME); // re-save with stable uid
+    saveUser(ME);
 
-    // Update the login screen to show "connecting..." briefly
-    document.getElementById('login-screen').style.display = 'flex';
-    document.getElementById('returning-panel').style.display = 'none';
-    document.getElementById('new-user-panel').style.display  = 'none';
+    // Hide login immediately — no splash, go straight to app
+    document.getElementById('login-screen').style.display = 'none';
 
-    // Show a quick connecting splash instead
-    const splash = document.createElement('div');
-    splash.style.cssText = 'text-align:center;';
-    splash.innerHTML = `
-      <div style="font-family:var(--font-display);font-size:48px;font-weight:900;letter-spacing:4px;color:var(--neon-cyan);text-shadow:0 0 32px rgba(0,245,255,0.5);">NEXUS<span style="color:var(--neon-purple);">CHAT</span></div>
-      <div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted);margin-top:16px;letter-spacing:1px;">Connessione come <span style="color:var(--neon-cyan);">${saved.name}</span>...</div>
-      <div style="margin-top:20px;display:flex;gap:6px;justify-content:center;">
-        <span style="width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);display:inline-block;animation:typing 1.2s infinite;"></span>
-        <span style="width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);display:inline-block;animation:typing 1.2s infinite .2s;"></span>
-        <span style="width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);display:inline-block;animation:typing 1.2s infinite .4s;"></span>
-      </div>
-      <button onclick="window.showNewLogin()" style="margin-top:24px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;font-family:var(--font-mono);text-decoration:underline;">Non sei ${saved.name}? Cambia account</button>`;
-    document.getElementById('login-screen').appendChild(splash);
-
+    // Connect to Firebase in background
     await connectToFirebase();
   } else {
-    // ── New user: show login form ──
+    // New user — show login form
     document.getElementById('returning-panel').style.display = 'none';
     document.getElementById('new-user-panel').style.display  = 'block';
     setTimeout(() => document.getElementById('login-username')?.focus(), 100);
@@ -2546,8 +2531,11 @@ function renderMessages() {
     }
 
     // Support both Firebase format (uid/authorName) and legacy (author)
-    const isFirebase = !!msg.uid;
-    const isMine     = isFirebase ? msg.uid === ME?.uid : msg.author === 'm1';
+    const isFirebase  = !!msg.uid;
+    // isMine: uid match is primary; authorName match is fallback for messages sent before uid stabilization
+    const isMine      = isFirebase
+      ? (msg.uid === ME?.uid || msg.authorName === ME?.name)
+      : msg.author === 'm1';
     const authorName = isFirebase ? msg.authorName  : (state.members?.find(x=>x.id===msg.author)?.name || 'Utente');
     const authorColor= isFirebase ? msg.authorColor : (state.members?.find(x=>x.id===msg.author)?.avatarColor || 'cyan');
     const authorTag  = isFirebase ? msg.authorTag   : (state.members?.find(x=>x.id===msg.author)?.tag || '');
